@@ -1,4 +1,4 @@
-# 发布 reqcache 到 PyPI 指南
+# 发布 reqcache-py 到 PyPI 指南
 
 ## 前置准备
 
@@ -17,7 +17,7 @@
 2. 进入账号设置: https://pypi.org/manage/account/
 3. 滚动到 "API tokens" 部分
 4. 点击 "Add API token"
-5. 给 token 起个名字（如 "reqcache-upload"）
+5. 给 token 起个名字（如 "reqcache-py-upload"）
 6. 选择 Scope: "Entire account" 或创建项目后选择特定项目
 7. 点击 "Add token"
 8. **重要**: 立即复制并保存 token（只显示一次！）
@@ -69,8 +69,8 @@ python -m build
 ```
 
 这会在 `dist/` 目录创建两个文件：
-- `reqcache-0.1.0-py3-none-any.whl` (wheel 格式)
-- `reqcache-0.1.0.tar.gz` (源码包)
+- `reqcache_py-0.1.0-py3-none-any.whl` (wheel 格式)
+- `reqcache-py-0.1.0.tar.gz` (源码包)
 
 ### 步骤 4: 检查构建的包
 
@@ -89,7 +89,7 @@ twine upload --repository testpypi dist/*
 ### 步骤 6: 从 TestPyPI 安装测试
 
 ```bash
-pip install --index-url https://test.pypi.org/simple/ --no-deps reqcache
+pip install --index-url https://test.pypi.org/simple/ --no-deps reqcache-py
 ```
 
 测试安装的包：
@@ -108,7 +108,7 @@ twine upload dist/*
 ### 步骤 8: 验证安装
 
 ```bash
-pip install reqcache
+pip install reqcache-py
 python -c "import reqcache; print(reqcache.__version__)"
 ```
 
@@ -150,7 +150,7 @@ bash publish.sh prod
 
 ## 常见问题
 
-### 问题 1: "The user 'username' isn't allowed to upload to project 'reqcache'"
+### 问题 1: "The user 'username' isn't allowed to upload to project 'reqcache-py'"
 
 **解决方案**:
 - 如果是首次发布，确保包名在 PyPI 上未被占用
@@ -180,8 +180,8 @@ bash publish.sh prod
 
 发布成功后的链接：
 
-- **PyPI 页面**: https://pypi.org/project/reqcache/
-- **安装命令**: `pip install reqcache`
+- **PyPI 页面**: https://pypi.org/project/reqcache-py/
+- **安装命令**: `pip install reqcache-py`
 - **GitHub**: https://github.com/wangys-kits/reqcache
 
 ## 徽章（Badge）
@@ -189,10 +189,10 @@ bash publish.sh prod
 发布成功后可以在 README.md 中添加这些徽章：
 
 ```markdown
-[![PyPI version](https://badge.fury.io/py/reqcache.svg)](https://badge.fury.io/py/reqcache)
-[![Python versions](https://img.shields.io/pypi/pyversions/reqcache.svg)](https://pypi.org/project/reqcache/)
-[![Downloads](https://pepy.tech/badge/reqcache)](https://pepy.tech/project/reqcache)
-[![License](https://img.shields.io/pypi/l/reqcache.svg)](https://github.com/wangys-kits/reqcache/blob/main/LICENSE)
+[![PyPI version](https://badge.fury.io/py/reqcache-py.svg)](https://badge.fury.io/py/reqcache-py)
+[![Python versions](https://img.shields.io/pypi/pyversions/reqcache-py.svg)](https://pypi.org/project/reqcache-py/)
+[![Downloads](https://pepy.tech/badge/reqcache-py)](https://pepy.tech/project/reqcache-py)
+[![License](https://img.shields.io/pypi/l/reqcache-py.svg)](https://github.com/wangys-kits/reqcache/blob/main/LICENSE)
 ```
 
 ## 自动化发布（GitHub Actions）

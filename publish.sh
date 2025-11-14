@@ -23,7 +23,7 @@ print_error() {
 }
 
 # 检查参数
-TARGET=${1:-test}
+TARGET=${1:-prod}
 
 if [ "$TARGET" != "test" ] && [ "$TARGET" != "prod" ]; then
     print_error "用法: $0 [test|prod]"
@@ -41,8 +41,24 @@ if ! command -v python &> /dev/null; then
     exit 1
 fi
 
-print_info "安装/升级构建工具..."
-pip install --upgrade build twine -q
+print_info "检查并安装构建工具..."
+MISSING_TOOLS=0
+if ! python -m build --version >/dev/null 2>&1; then
+    MISSING_TOOLS=1
+fi
+if ! command -v twine >/dev/null 2>&1; then
+    MISSING_TOOLS=1
+fi
+
+if [ "$MISSING_TOOLS" -eq 1 ]; then
+    print_info "安装/升级构建工具..."
+    if ! pip install --upgrade build twine -q; then
+        print_error "构建工具安装/升级失败，请检查网络或手动确保已安装 build 和 twine"
+        exit 1
+    fi
+else
+    print_info "构建工具已安装"
+fi
 
 # 步骤 2: 清理旧的构建文件
 print_info "清理旧的构建文件..."
@@ -58,7 +74,17 @@ print_info "✓ 所有测试通过"
 
 # 步骤 4: 构建分发包
 print_info "构建分发包..."
-python -m build
+python -m build --no-isolation
+
+# 处理 sdist 文件名，确保符合 PyPI 规范（reqcache-py -> reqcache_py）
+for sdist in dist/reqcache-py-*.tar.gz; do
+    if [ -f "$sdist" ]; then
+        fixed_name="${sdist/reqcache-py/reqcache_py}"
+        if [ "$sdist" != "$fixed_name" ]; then
+            mv "$sdist" "$fixed_name"
+        fi
+    fi
+done
 
 if [ ! -d "dist" ]; then
     print_error "构建失败，dist/ 目录不存在"
@@ -100,10 +126,10 @@ if [ "$TARGET" = "test" ]; then
         print_info "✓ 成功上传到 TestPyPI!"
         echo ""
         print_info "测试安装命令:"
-        echo "  pip install --index-url https://test.pypi.org/simple/ --no-deps reqcache"
+        echo "  pip install --index-url https://test.pypi.org/simple/ --no-deps reqcache-py"
         echo ""
         print_info "TestPyPI 项目页面:"
-        echo "  https://test.pypi.org/project/reqcache/"
+        echo "  https://test.pypi.org/project/reqcache-py/"
     else
         print_error "上传失败"
         exit 1
@@ -129,10 +155,10 @@ else
         print_info "✓ 成功发布到 PyPI!"
         echo ""
         print_info "安装命令:"
-        echo "  pip install reqcache"
+        echo "  pip install reqcache-py"
         echo ""
         print_info "PyPI 项目页面:"
-        echo "  https://pypi.org/project/reqcache/"
+        echo "  https://pypi.org/project/reqcache-py/"
         echo ""
         print_info "别忘了创建 GitHub Release:"
         echo "  git tag v0.1.0"

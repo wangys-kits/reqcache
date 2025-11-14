@@ -1,12 +1,12 @@
 # reqcache
 
-A simple, transparent caching wrapper for Python's `requests` library. Perfect for data collection, web scraping, and reducing redundant HTTP requests during development.
+A simple, transparent caching wrapper for Python's `requests` library with TTL-based cache control. Perfect for data collection, web scraping, and reducing redundant HTTP requests during development.
 
 ## Features
 
-- **Drop-in compatibility** with `requests` - just add `cache=True`
-- **Automatic caching** to local `.cache/` directory
-- **Configurable TTL** (Time To Live) with sensible defaults
+- **TTL-based caching** - control caching with time-to-live values
+- **Default caching enabled** - caches for 1 day by default
+- **Simple API** - just use `cache_ttl` parameter
 - **Smart cache keys** based on URL, HTTP method, and request parameters
 - **Thread-safe** for concurrent usage
 - **Complete response preservation** using pickle serialization
@@ -29,14 +29,22 @@ pip install -e ".[dev]"
 ```python
 import reqcache
 
-# Standard request (no caching)
+# Cached request (default 1-day TTL)
 response = reqcache.get('https://api.example.com/data')
 
-# Cached request (default 24-hour TTL)
-response = reqcache.get('https://api.example.com/data', cache=True)
-
 # Custom TTL (1 hour = 3600 seconds)
-response = reqcache.get('https://api.example.com/data', cache=True, cache_ttl=3600)
+response = reqcache.get('https://api.example.com/data', cache_ttl=3600)
+
+# Disable caching
+response = reqcache.get('https://api.example.com/data', cache_ttl=0)
+
+# Permanent caching (never expires)
+response = reqcache.get('https://api.example.com/data', cache_ttl=-1)
+
+# Use TTL constants
+response = reqcache.get('https://api.example.com/data', cache_ttl=reqcache.TTL_ONE_DAY)
+response = reqcache.get('https://api.example.com/data', cache_ttl=reqcache.TTL_DISABLED)
+response = reqcache.get('https://api.example.com/data', cache_ttl=reqcache.TTL_PERMANENT)
 ```
 
 ## Usage Examples
@@ -46,13 +54,34 @@ response = reqcache.get('https://api.example.com/data', cache=True, cache_ttl=36
 ```python
 import reqcache
 
-# First call makes network request and caches response
-response = reqcache.get('https://httpbin.org/uuid', cache=True)
+# First call makes network request and caches response (default 1 day)
+response = reqcache.get('https://httpbin.org/uuid')
 print(response.json())  # {'uuid': 'abc-123-def'}
 
 # Second call returns cached response (no network request)
-response = reqcache.get('https://httpbin.org/uuid', cache=True)
+response = reqcache.get('https://httpbin.org/uuid')
 print(response.json())  # {'uuid': 'abc-123-def'} - same UUID!
+```
+
+### TTL Control
+
+```python
+import reqcache
+
+# Cache for 1 hour (3600 seconds)
+response = reqcache.get('https://api.example.com/data', cache_ttl=3600)
+
+# Cache for 5 minutes
+response = reqcache.get('https://api.example.com/data', cache_ttl=300)
+
+# Cache for 1 week
+response = reqcache.get('https://api.example.com/data', cache_ttl=604800)
+
+# Disable caching (no cache)
+response = reqcache.get('https://api.example.com/data', cache_ttl=0)
+
+# Permanent caching (never expires)
+response = reqcache.get('https://api.example.com/data', cache_ttl=-1)
 ```
 
 ### All HTTP Methods Supported
@@ -60,31 +89,18 @@ print(response.json())  # {'uuid': 'abc-123-def'} - same UUID!
 ```python
 import reqcache
 
-# GET request
-reqcache.get('https://api.example.com/users', cache=True)
+# All HTTP methods support TTL-based caching
+reqcache.get('https://api.example.com/users')                    # Default 1-day cache
+reqcache.post('https://api.example.com/users', json={'name': 'Alice'})  # Default 1-day cache
+reqcache.put('https://api.example.com/users/1', json={'name': 'Bob'})    # Default 1-day cache
+reqcache.delete('https://api.example.com/users/1')                     # Default 1-day cache
+reqcache.patch('https://api.example.com/users/1', json={'active': False}) # Default 1-day cache
+reqcache.head('https://api.example.com/users/1')                        # Default 1-day cache
+reqcache.options('https://api.example.com/users/1')                     # Default 1-day cache
 
-# POST request
-reqcache.post('https://api.example.com/users', json={'name': 'Alice'}, cache=True)
-
-# PUT, DELETE, PATCH, HEAD, OPTIONS also supported
-reqcache.put('https://api.example.com/users/1', json={'name': 'Bob'}, cache=True)
-reqcache.delete('https://api.example.com/users/1', cache=True)
-reqcache.patch('https://api.example.com/users/1', json={'active': False}, cache=True)
-```
-
-### Custom TTL
-
-```python
-import reqcache
-
-# Cache for 1 hour (3600 seconds)
-reqcache.get('https://api.example.com/data', cache=True, cache_ttl=3600)
-
-# Cache for 5 minutes
-reqcache.get('https://api.example.com/data', cache=True, cache_ttl=300)
-
-# Cache for 1 week
-reqcache.get('https://api.example.com/data', cache=True, cache_ttl=604800)
+# Disable caching for any method
+reqcache.get('https://api.example.com/users', cache_ttl=0)
+reqcache.post('https://api.example.com/users', json={'name': 'Alice'}, cache_ttl=0)
 ```
 
 ### Full requests Compatibility
@@ -96,7 +112,7 @@ import reqcache
 
 response = reqcache.get(
     'https://api.example.com/data',
-    cache=True,
+    cache_ttl=3600,  # 1 hour cache
     headers={'Authorization': 'Bearer token123'},
     params={'page': 1, 'limit': 10},
     timeout=30,
@@ -121,21 +137,55 @@ deleted = reqcache.clear_cache()
 print(f"Deleted {deleted} cache files")
 ```
 
-### Custom Cache Directory
+## Migration Guide (pre-1.0.0 → v1.0.0)
 
+Version 1.0.0 introduces breaking changes with a simplified TTL-only API.
+
+### Key Changes
+- **Removed**: `cache` boolean parameter
+- **Removed**: `cache_dir` parameter from request functions
+- **Changed**: Default behavior is now to cache for 1 day
+- **Added**: TTL constants (`TTL_DISABLED`, `TTL_PERMANENT`, `TTL_ONE_DAY`)
+
+### API Migration
+
+**Before (pre-1.0.0):**
 ```python
-import reqcache
+# No caching (default)
+reqcache.get('https://api.example.com/data')
 
-# Use custom cache directory
-response = reqcache.get(
-    'https://api.example.com/data',
-    cache=True,
-    cache_dir='./my_custom_cache'
-)
+# Enable caching
+reqcache.get('https://api.example.com/data', cache=True)
 
-# Clear specific cache directory
-reqcache.clear_cache(cache_dir='./my_custom_cache')
+# Custom TTL
+reqcache.get('https://api.example.com/data', cache=True, cache_ttl=3600)
+
+# Custom cache directory
+reqcache.get('https://api.example.com/data', cache=True, cache_dir='./my_cache')
 ```
+
+**After (v1.0.0):**
+```python
+# Default caching (1 day)
+reqcache.get('https://api.example.com/data')
+
+# Disable caching
+reqcache.get('https://api.example.com/data', cache_ttl=0)
+
+# Custom TTL
+reqcache.get('https://api.example.com/data', cache_ttl=3600)
+
+# Use constants
+reqcache.get('https://api.example.com/data', cache_ttl=reqcache.TTL_DISABLED)
+reqcache.get('https://api.example.com/data', cache_ttl=reqcache.TTL_PERMANENT)
+reqcache.get('https://api.example.com/data', cache_ttl=reqcache.TTL_ONE_DAY)
+```
+
+### TTL Values Reference
+- `0` or `reqcache.TTL_DISABLED`: No caching
+- `-1` or `reqcache.TTL_PERMANENT`: Permanent caching (never expires)
+- `86400` or `reqcache.TTL_ONE_DAY`: 1 day (default)
+- Any positive integer: Cache for that many seconds
 
 ## How It Works
 

@@ -4,15 +4,23 @@
 TBD - created by archiving change add-request-caching. Update Purpose after archive.
 ## Requirements
 ### Requirement: Cache-Enabled Request Wrapper
-The system SHALL provide a wrapper around Python's requests library that supports optional caching of HTTP responses to local disk.
+The system SHALL provide a wrapper around Python's requests library that uses TTL-based cache control without boolean cache parameters.
 
-#### Scenario: Cache disabled by default
-- **WHEN** a request is made without cache parameter
+#### Scenario: Default caching with one-day TTL
+- **WHEN** a request is made without specifying cache_ttl parameter
+- **THEN** the system caches for exactly 86400 seconds (24 hours)
+
+#### Scenario: TTL-controlled caching
+- **WHEN** a request specifies cache_ttl > 0
+- **THEN** the system caches for the specified number of seconds
+
+#### Scenario: Permanent caching
+- **WHEN** a request specifies cache_ttl = -1
+- **THEN** the system caches permanently without expiration
+
+#### Scenario: Cache disabled
+- **WHEN** a request specifies cache_ttl = 0
 - **THEN** the request behaves exactly like standard requests library (no caching)
-
-#### Scenario: Cache enabled for request
-- **WHEN** a request is made with `cache=True` parameter
-- **THEN** the system checks local cache before making network request
 
 #### Scenario: Cache hit returns stored response
 - **WHEN** a cached response exists and has not expired
@@ -64,36 +72,36 @@ The system SHALL serialize complete response objects using Python's pickle forma
 - **THEN** it behaves identically to the original network response object
 
 ### Requirement: Configurable TTL (Time To Live)
-The system SHALL support configurable expiration times for cached responses.
+The system SHALL handle TTL semantics including permanent caching and disabled caching.
 
-#### Scenario: Default TTL applied
-- **WHEN** cache is enabled without specifying TTL
-- **THEN** a default TTL of 24 hours is applied
+#### Scenario: TTL zero disables caching
+- **WHEN** cache_ttl = 0 is specified
+- **THEN** no cache operations are performed
 
-#### Scenario: Custom TTL per request
-- **WHEN** a request specifies a custom TTL value
-- **THEN** the cached response expires after the specified duration
+#### Scenario: TTL negative one enables permanent caching
+- **WHEN** cache_ttl = -1 is specified
+- **THEN** cached responses never expire
 
-#### Scenario: Expired cache triggers refresh
-- **WHEN** a cached response has exceeded its TTL
-- **THEN** the system treats it as cache miss and makes a new network request
+#### Scenario: Positive TTL creates timed cache
+- **WHEN** cache_ttl > 0 is specified
+- **THEN** cached responses expire after the specified seconds
 
-#### Scenario: Cache timestamp validation
+#### Scenario: Cache timestamp validation with TTL
 - **WHEN** checking cache validity
-- **THEN** the system compares current time with cache creation time plus TTL
+- **THEN** the system handles permanent cache (TTL=-1) and disabled cache (TTL=0) correctly
 
 ### Requirement: API Compatibility
-The system MUST maintain compatibility with the requests library API.
+The system SHALL provide a simplified API that only requires TTL parameter for cache control.
 
-#### Scenario: Standard requests methods supported
-- **WHEN** using common HTTP methods (GET, POST, PUT, DELETE, etc.)
-- **THEN** the cache-enabled wrapper supports all methods that requests supports
+#### Scenario: No cache parameter in function signatures
+- **WHEN** examining HTTP method function signatures
+- **THEN** only cache_ttl parameter is present for cache control
 
-#### Scenario: Request parameters pass through
-- **WHEN** using requests parameters like headers, timeout, auth, etc.
-- **THEN** all parameters work identically to standard requests library
+#### Scenario: Consistent TTL behavior across methods
+- **WHEN** using any HTTP method (GET, POST, PUT, etc.)
+- **THEN** cache_ttl parameter behaves identically across all methods
 
-#### Scenario: Response object compatibility
-- **WHEN** a response is returned (cached or fresh)
-- **THEN** it provides the same attributes and methods as requests.Response object
+#### Scenario: TTL validation
+- **WHEN** invalid cache_ttl values are provided
+- **THEN** the system raises appropriate validation errors
 

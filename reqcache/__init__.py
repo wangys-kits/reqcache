@@ -1,8 +1,12 @@
 """
 reqcache - A caching wrapper for Python requests library
 
-This module provides transparent, opt-in caching for HTTP requests.
+This module provides TTL-based caching for HTTP requests.
 Cached responses are stored in a local `.cache/` directory using pickle serialization.
+Use cache_ttl parameter to control caching behavior:
+- 0: No caching
+- -1: Permanent caching
+- >0: Cache for specified seconds (default: 86400)
 """
 
 import hashlib
@@ -18,15 +22,21 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import requests
 from requests import Response
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 __all__ = [
     "get", "post", "put", "delete", "patch", "head", "options",
-    "request", "clear_cache", "get_cache_info"
+    "request", "clear_cache", "get_cache_info",
+    "TTL_DISABLED", "TTL_PERMANENT", "TTL_ONE_DAY"
 ]
+
+# TTL Constants
+TTL_DISABLED = 0     # No caching
+TTL_PERMANENT = -1   # Cache permanently
+TTL_ONE_DAY = 86400  # 24 hours in seconds
 
 # Default configuration
 DEFAULT_CACHE_DIR = ".cache"
-DEFAULT_TTL = 86400  # 24 hours in seconds
+DEFAULT_TTL = TTL_ONE_DAY
 
 # Thread lock for cache operations
 _cache_lock = Lock()
@@ -103,21 +113,20 @@ def _generate_cache_key(
     return hashlib.sha256(cache_key.encode()).hexdigest()
 
 
-def _get_cache_path(cache_key: str, cache_dir: str = DEFAULT_CACHE_DIR) -> Path:
+def _get_cache_path(cache_key: str) -> Path:
     """Get the file path for a cache key."""
-    return Path(cache_dir) / f"{cache_key}.pkl"
+    return Path(DEFAULT_CACHE_DIR) / f"{cache_key}.pkl"
 
 
-def _ensure_cache_dir(cache_dir: str = DEFAULT_CACHE_DIR) -> None:
+def _ensure_cache_dir() -> None:
     """Create cache directory if it doesn't exist."""
-    Path(cache_dir).mkdir(parents=True, exist_ok=True)
+    Path(DEFAULT_CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
 
 def _save_to_cache(
     cache_key: str,
     response: Response,
     ttl: int,
-    cache_dir: str = DEFAULT_CACHE_DIR,
 ) -> None:
     """
     Save a response to cache with timestamp and TTL.
@@ -125,11 +134,14 @@ def _save_to_cache(
     Args:
         cache_key: Unique cache key
         response: Response object to cache
-        ttl: Time to live in seconds
-        cache_dir: Cache directory path
+        ttl: Time to live in seconds (-1 for permanent)
     """
+    # Skip saving if TTL is 0 (no caching)
+    if ttl == TTL_DISABLED:
+        return
+
     with _cache_lock:
-        _ensure_cache_dir(cache_dir)
+        _ensure_cache_dir()
 
         cache_data = {
             "timestamp": time.time(),
@@ -137,26 +149,24 @@ def _save_to_cache(
             "response": response,
         }
 
-        cache_path = _get_cache_path(cache_key, cache_dir)
+        cache_path = _get_cache_path(cache_key)
         with open(cache_path, "wb") as f:
             pickle.dump(cache_data, f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def _load_from_cache(
     cache_key: str,
-    cache_dir: str = DEFAULT_CACHE_DIR,
 ) -> Optional[Response]:
     """
     Load a response from cache if it exists and hasn't expired.
 
     Args:
         cache_key: Unique cache key
-        cache_dir: Cache directory path
 
     Returns:
         Cached Response object if valid, None otherwise
     """
-    cache_path = _get_cache_path(cache_key, cache_dir)
+    cache_path = _get_cache_path(cache_key)
 
     if not cache_path.exists():
         return None
@@ -170,9 +180,11 @@ def _load_from_cache(
         timestamp = cache_data.get("timestamp", 0)
         ttl = cache_data.get("ttl", DEFAULT_TTL)
 
-        if time.time() - timestamp > ttl:
-            # Cache expired
-            return None
+        # Check expiration (skip for permanent cache TTL=-1)
+        if ttl != TTL_PERMANENT:
+            if time.time() - timestamp > ttl:
+                # Cache expired
+                return None
 
         return cache_data.get("response")
 
@@ -184,27 +196,32 @@ def _load_from_cache(
 def request(
     method: str,
     url: str,
-    cache: bool = False,
-    cache_ttl: Optional[int] = None,
-    cache_dir: str = DEFAULT_CACHE_DIR,
+    cache_ttl: int = DEFAULT_TTL,
     **kwargs
 ) -> Response:
     """
-    Make an HTTP request with optional caching.
+    Make an HTTP request with TTL-based caching control.
 
     Args:
         method: HTTP method
         url: Request URL
-        cache: Enable caching if True
-        cache_ttl: Cache time-to-live in seconds (default: 24 hours)
-        cache_dir: Directory for cache storage
+        cache_ttl: Cache time-to-live control:
+                  - 0: No caching (passes through to requests)
+                  - -1: Permanent caching (no expiration)
+                  - >0: Cache for specified seconds (default: 86400)
         **kwargs: Additional arguments passed to requests.request()
 
     Returns:
         Response object (cached or fresh)
     """
-    if not cache:
-        # No caching, pass through to requests
+    # Validate cache_ttl parameter
+    if not isinstance(cache_ttl, int):
+        raise ValueError(f"cache_ttl must be an integer, got {type(cache_ttl).__name__}")
+    if cache_ttl < -1:
+        raise ValueError(f"cache_ttl must be -1, 0, or positive, got {cache_ttl}")
+
+    # If caching is disabled (TTL=0), pass through to requests
+    if cache_ttl == TTL_DISABLED:
         return requests.request(method, url, **kwargs)
 
     # Generate cache key
@@ -217,7 +234,7 @@ def request(
     )
 
     # Try to load from cache
-    cached_response = _load_from_cache(cache_key, cache_dir)
+    cached_response = _load_from_cache(cache_key)
     if cached_response is not None:
         return cached_response
 
@@ -225,58 +242,54 @@ def request(
     response = requests.request(method, url, **kwargs)
 
     # Save to cache
-    ttl = cache_ttl if cache_ttl is not None else DEFAULT_TTL
-    _save_to_cache(cache_key, response, ttl, cache_dir)
+    _save_to_cache(cache_key, response, cache_ttl)
 
     return response
 
 
-def get(url: str, cache: bool = False, cache_ttl: Optional[int] = None, **kwargs) -> Response:
-    """Make a GET request with optional caching."""
-    return request("GET", url, cache=cache, cache_ttl=cache_ttl, **kwargs)
+def get(url: str, cache_ttl: int = DEFAULT_TTL, **kwargs) -> Response:
+    """Make a GET request with TTL-based caching control."""
+    return request("GET", url, cache_ttl=cache_ttl, **kwargs)
 
 
-def post(url: str, cache: bool = False, cache_ttl: Optional[int] = None, **kwargs) -> Response:
-    """Make a POST request with optional caching."""
-    return request("POST", url, cache=cache, cache_ttl=cache_ttl, **kwargs)
+def post(url: str, cache_ttl: int = DEFAULT_TTL, **kwargs) -> Response:
+    """Make a POST request with TTL-based caching control."""
+    return request("POST", url, cache_ttl=cache_ttl, **kwargs)
 
 
-def put(url: str, cache: bool = False, cache_ttl: Optional[int] = None, **kwargs) -> Response:
-    """Make a PUT request with optional caching."""
-    return request("PUT", url, cache=cache, cache_ttl=cache_ttl, **kwargs)
+def put(url: str, cache_ttl: int = DEFAULT_TTL, **kwargs) -> Response:
+    """Make a PUT request with TTL-based caching control."""
+    return request("PUT", url, cache_ttl=cache_ttl, **kwargs)
 
 
-def delete(url: str, cache: bool = False, cache_ttl: Optional[int] = None, **kwargs) -> Response:
-    """Make a DELETE request with optional caching."""
-    return request("DELETE", url, cache=cache, cache_ttl=cache_ttl, **kwargs)
+def delete(url: str, cache_ttl: int = DEFAULT_TTL, **kwargs) -> Response:
+    """Make a DELETE request with TTL-based caching control."""
+    return request("DELETE", url, cache_ttl=cache_ttl, **kwargs)
 
 
-def patch(url: str, cache: bool = False, cache_ttl: Optional[int] = None, **kwargs) -> Response:
-    """Make a PATCH request with optional caching."""
-    return request("PATCH", url, cache=cache, cache_ttl=cache_ttl, **kwargs)
+def patch(url: str, cache_ttl: int = DEFAULT_TTL, **kwargs) -> Response:
+    """Make a PATCH request with TTL-based caching control."""
+    return request("PATCH", url, cache_ttl=cache_ttl, **kwargs)
 
 
-def head(url: str, cache: bool = False, cache_ttl: Optional[int] = None, **kwargs) -> Response:
-    """Make a HEAD request with optional caching."""
-    return request("HEAD", url, cache=cache, cache_ttl=cache_ttl, **kwargs)
+def head(url: str, cache_ttl: int = DEFAULT_TTL, **kwargs) -> Response:
+    """Make a HEAD request with TTL-based caching control."""
+    return request("HEAD", url, cache_ttl=cache_ttl, **kwargs)
 
 
-def options(url: str, cache: bool = False, cache_ttl: Optional[int] = None, **kwargs) -> Response:
-    """Make an OPTIONS request with optional caching."""
-    return request("OPTIONS", url, cache=cache, cache_ttl=cache_ttl, **kwargs)
+def options(url: str, cache_ttl: int = DEFAULT_TTL, **kwargs) -> Response:
+    """Make an OPTIONS request with TTL-based caching control."""
+    return request("OPTIONS", url, cache_ttl=cache_ttl, **kwargs)
 
 
-def clear_cache(cache_dir: str = DEFAULT_CACHE_DIR) -> int:
+def clear_cache() -> int:
     """
     Clear all cached responses.
-
-    Args:
-        cache_dir: Cache directory to clear
 
     Returns:
         Number of cache files deleted
     """
-    cache_path = Path(cache_dir)
+    cache_path = Path(DEFAULT_CACHE_DIR)
 
     if not cache_path.exists():
         return 0
@@ -293,23 +306,21 @@ def clear_cache(cache_dir: str = DEFAULT_CACHE_DIR) -> int:
     return count
 
 
-def get_cache_info(cache_dir: str = DEFAULT_CACHE_DIR) -> Dict[str, Any]:
+def get_cache_info() -> Dict[str, Any]:
     """
     Get information about the cache.
-
-    Args:
-        cache_dir: Cache directory to inspect
 
     Returns:
         Dictionary with cache statistics
     """
-    cache_path = Path(cache_dir)
+    cache_path = Path(DEFAULT_CACHE_DIR)
 
     if not cache_path.exists():
         return {
             "exists": False,
             "total_files": 0,
             "total_size_bytes": 0,
+            "total_size_mb": 0,
             "valid_entries": 0,
             "expired_entries": 0,
         }
@@ -331,10 +342,14 @@ def get_cache_info(cache_dir: str = DEFAULT_CACHE_DIR) -> Dict[str, Any]:
             timestamp = cache_data.get("timestamp", 0)
             ttl = cache_data.get("ttl", DEFAULT_TTL)
 
-            if time.time() - timestamp <= ttl:
-                valid_entries += 1
+            # Check expiration (skip for permanent cache TTL=-1)
+            if ttl != TTL_PERMANENT:
+                if time.time() - timestamp <= ttl:
+                    valid_entries += 1
+                else:
+                    expired_entries += 1
             else:
-                expired_entries += 1
+                valid_entries += 1
 
         except (OSError, pickle.PickleError, KeyError):
             expired_entries += 1
